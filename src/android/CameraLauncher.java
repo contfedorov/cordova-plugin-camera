@@ -21,6 +21,7 @@ package org.apache.cordova.camera;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -58,6 +59,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 
 /**
@@ -391,12 +393,14 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             } else {
                 intent.setAction(Intent.ACTION_GET_CONTENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
             }
         } else if (this.mediaType == VIDEO) {
             intent.setType("video/*");
             title = GET_VIDEO;
             intent.setAction(Intent.ACTION_GET_CONTENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         } else if (this.mediaType == ALLMEDIA) {
             // I wanted to make the type 'image/*, video/*' but this does not work on all versions
             // of android so I had to go with the wildcard search.
@@ -404,6 +408,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             title = GET_All;
             intent.setAction(Intent.ACTION_GET_CONTENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         }
         if (this.cordova != null) {
             this.cordova.startActivityForResult((CordovaPlugin) this, Intent.createChooser(intent,
@@ -544,7 +549,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 // If we saved the uncompressed photo to the album, we can just
                 // return the URI we already created
                 if (this.saveToPhotoAlbum) {
-                    this.callbackContext.success(galleryUri.toString());
+                    this.successPicture(galleryUri.toString());
                 } else {
                     Uri uri = Uri.fromFile(createCaptureFile(this.encodingType, System.currentTimeMillis() + ""));
 
@@ -556,7 +561,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                         writeUncompressedImage(imageUri, uri);
                     }
 
-                    this.callbackContext.success(uri.toString());
+                    this.successPicture(uri.toString());
                 }
             } else {
                 Uri uri = Uri.fromFile(createCaptureFile(this.encodingType, System.currentTimeMillis() + ""));
@@ -591,7 +596,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 }
 
                 // Send Uri back to JavaScript for viewing image
-                this.callbackContext.success(uri.toString());
+                this.successPicture(uri.toString());
 
             }
         } else {
@@ -675,27 +680,52 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
      * @param intent   An Intent, which can return result data to the caller (various data can be attached to Intent "extras").
      */
     private void processResultFromGallery(int destType, Intent intent) {
-        Uri uri = intent.getData();
-        if (uri == null) {
-            if (croppedUri != null) {
-                uri = croppedUri;
-            } else {
-                this.failPicture("null data from photo library");
-                return;
+        Uri[] uris;
+
+        //check if there were multiple files selection
+        ClipData clipData = intent.getClipData();
+
+        if (clipData == null || clipData.getItemCount() == 0) {
+            //single file selected, process it as usual (get from intent directly)
+
+            Uri uri = intent.getData();
+            if (uri == null) {
+                if (croppedUri != null) {
+                    uri = croppedUri;
+                } else {
+                    this.failPicture("null data from photo library");
+                    return;
+                }
+            }
+
+            uris = new Uri[1];
+            uris[0] = uri;
+        } else {
+            //multiple files selected
+            int count = clipData.getItemCount();
+            uris = new Uri[count];
+
+            for (int i = 0; i < count; i++) {
+                uris[i] = clipData.getItemAt(i).getUri();
             }
         }
-        int rotate = 0;
 
-        String fileLocation = FileHelper.getRealPath(uri, this.cordova);
-        LOG.d(LOG_TAG, "File location is: " + fileLocation);
+        ArrayList<String> fileLocations = new ArrayList<String>(uris.length);
 
+        for (int i = 0; i < uris.length; i++) {
+            String fileLocation = FileHelper.getRealPath(uris[i], this.cordova);
+            fileLocations.add(fileLocation);
+            LOG.d(LOG_TAG, "File locaton is: " + fileLocation);
+        }
+        
+        Uri uri = uris[0]; //use only first image for scaling/rotating
         String uriString = uri.toString();
         String mimeType = FileHelper.getMimeType(uriString, this.cordova);
 
         // If you ask for video or the selected file doesn't have JPEG or PNG mime type
         //  there will be no attempt to resize any returned data
         if (this.mediaType == VIDEO || !(JPEG_MIME_TYPE.equalsIgnoreCase(mimeType) || PNG_MIME_TYPE.equalsIgnoreCase(mimeType))) {
-            this.callbackContext.success(fileLocation);
+            this.callbackContext.success(new JSONArray(fileLocations));
         }
         else {
 
@@ -705,7 +735,12 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                     (destType == FILE_URI || destType == NATIVE_URI) && !this.correctOrientation &&
                     mimeType != null && mimeType.equalsIgnoreCase(getMimetypeForFormat(encodingType)))
             {
-                this.callbackContext.success(uriString);
+                ArrayList<String> uriStrings = new ArrayList<String>(uris.length);
+
+                for (int i = 0; i < uris.length; i++)
+                    uriStrings.add(uris[i].toString());
+
+                this.callbackContext.success(new JSONArray(uriStrings));
             } else {
                 Bitmap bitmap = null;
                 try {
@@ -735,14 +770,14 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                             String modifiedPath = this.outputModifiedBitmap(bitmap, uri);
                             // The modified image is cached by the app in order to get around this and not have to delete you
                             // application cache I'm adding the current system time to the end of the file url.
-                            this.callbackContext.success("file://" + modifiedPath + "?" + System.currentTimeMillis());
+                            this.successPicture("file://" + modifiedPath + "?" + System.currentTimeMillis());
 
                         } catch (Exception e) {
                             e.printStackTrace();
                             this.failPicture("Error retrieving image.");
                         }
                     } else {
-                        this.callbackContext.success(fileLocation);
+                        this.successPicture(fileLocations.get(0));
                     }
                 }
                 if (bitmap != null) {
@@ -752,6 +787,12 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 System.gc();
             }
         }
+    }
+
+    private void successPicture(String path) {
+        JSONArray res = new JSONArray();
+        res.put(path);
+        this.callbackContext.success(res);
     }
 
     /**
@@ -1265,7 +1306,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 byte[] code = jpeg_data.toByteArray();
                 byte[] output = Base64.encode(code, Base64.NO_WRAP);
                 String js_out = new String(output);
-                this.callbackContext.success(js_out);
+                this.successPicture(js_out);
                 js_out = null;
                 output = null;
                 code = null;
