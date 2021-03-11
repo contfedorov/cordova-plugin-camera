@@ -736,7 +736,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
 
         Uri uri = uris[0]; //use only first image for scaling/rotating
         String uriString = uri.toString();
-        String finalLocation = fileLocation != null ? fileLocation : uriString;
+        String finalLocation = fileLocations.get(0) != null ? fileLocations.get(0) : uriString;
         String mimeType = FileHelper.getMimeType(uriString, this.cordova);
 
         if (finalLocation == null) {
