@@ -753,7 +753,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
             // This is a special case to just return the path as no scaling,
             // rotating, nor compressing needs to be done
             if (this.targetHeight == -1 && this.targetWidth == -1 &&
-                    (destType == FILE_URI && !this.correctOrientation &&
+                    destType == FILE_URI && !this.correctOrientation &&
                     mimeType != null && mimeType.equalsIgnoreCase(getMimetypeForFormat(encodingType)))
             {
                 ArrayList<String> uriStrings = new ArrayList<String>(uris.length);
