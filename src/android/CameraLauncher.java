@@ -809,6 +809,7 @@ public class CameraLauncher extends CordovaPlugin implements MediaScannerConnect
                 }
             }
         }
+    }
 
     private void successPicture(String path) {
         JSONArray res = new JSONArray();
